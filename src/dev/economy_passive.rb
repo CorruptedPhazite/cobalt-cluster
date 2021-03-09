@@ -1,7 +1,6 @@
 # Crystal: Economy Earning
 require 'rufus-scheduler'
 require 'set'
-require 'uri'
 
 # This crystal contains the portion of Cobalt's economy features that handle awarding points for activity.
 # Note: This is separate due to the expectation that it will also be extremely large.
@@ -21,16 +20,20 @@ module Bot::EconomyPassive
 
   # Channels that don't earn points
   IGNORED_CHANNELS = [
-    # text
     READ_ME_FIRST_CHANNEL_ID,
     ADDITIONAL_INFO_CHANNEL_ID,
     PARTNERS_CHANNEL_ID,
     QUOTEBOARD_CHANNEL_ID,
     BOT_COMMANDS_CHANNEL_ID,
+    *VOICE_TEXT_CHANNELS
+  ].freeze
 
-    # voice
-    MOD_VC_CHANNEL_ID,
-    MUSIC_VC_CHANNEL_ID
+  # Channels that have special point handling
+  SPECIAL_CHAT_CHANNELS = [
+    SVTFOE_DISCUSSION_ID,
+    SVTFOE_GALLERY_ID,
+    ORIGINAL_ART_CHANNEL_ID,
+    ORIGINAL_CONTENT_CHANNEL_ID
   ].freeze
 
   # The minimum number of people actively voice chat required to earn points.
@@ -42,29 +45,23 @@ module Bot::EconomyPassive
 
   # Message event handler
   @@sent_messages = {} # map of channels to users participating
-  @@message_bonus = {} # map of special message bonuses
   message do |event|
     next unless event.server == SERVER
     next if event.channel == nil || IGNORED_CHANNELS.include?(event.channel.id)
     next if event.user == nil
 
+    # special message rewards
+    if SPECIAL_CHAT_CHANNELS.include?(event.channel.id)
+      # do special handling
+    end
+
     # general chat awarding
     DATA_LOCK.synchronize do
-      # add to sent messages
       if @@sent_messages[event.channel.id] == nil
         @@sent_messages[event.channel.id] = Set[]
       end
 
       @@sent_messages[event.channel.id].add(event.user.id)
-
-      # queue up any necessary bonuses
-      new_bonus = get_bonus_reward(event.user.id, event.channel.id, event.message)
-      if not @@message_bonus[event.user.id].nil?
-        old_bonus = @@message_bonus[event.user.id]
-        @@message_bonus[event.user.id] = max(old_bonus, new_bonus)
-      elsif new_bonus > 0
-        @@message_bonus[event.user.id] = new_bonus
-      end
     end
   end
 
@@ -83,6 +80,7 @@ module Bot::EconomyPassive
         @@voice_connected[event.channel.id] = Set[]
       end
 
+
       # user disconnected
       if event.channel == nil && event.old_channel != nil
         @@voice_connected[event.old_channel.id].delete(event.user.id)
@@ -98,7 +96,7 @@ module Bot::EconomyPassive
         # continue on
       end
 
-      # remove users that have deafened themselves
+      # remove users that have deafed themselves
       if event.deaf || event.self_deaf
         @@voice_connected[event.channel.id].delete(event.user.id)
         next # done processing
@@ -115,26 +113,19 @@ module Bot::EconomyPassive
   SCHEDULER.every '1m' do
     DATA_LOCK.synchronize do
       # reward points for voice chat, can only earn points from one channel
-      voice_earned = {}
+      already_earned_voice = Set[]
       @@voice_connected.each do |channel_id, connected|
         next unless connected.count >= MIN_VOICE_CONNECTED
 
         # reward points to all users connected
         connected.each do |user_id|
-          cur_value = voice_earned[user_id]
-          cur_value = 0 if cur_value == nil
-
-          new_value = get_voice_reward(channel_id)
-          voice_earned[user_id] = max(cur_value, new_value)
+          next if already_earned_voice.include?(user_id)
+          already_earned_voice.add(user_id)
+          RewardVoiceActivity(user_id)
         end
       end
 
-      # award points to each user participating in voice
-      voice_earned.each do |user, earnings|
-        Bot::Bank::deposit(user, earnings)
-      end
-
-      # users earn points from the highest valued chat
+      # users earn points from the highest valued caht
       chat_earned = {}
       @@sent_messages.each do |channel_id, users|
         next if users.empty?
@@ -144,26 +135,18 @@ module Bot::EconomyPassive
           cur_value = chat_earned[user_id]
           cur_value = 0 if cur_value == nil
 
-          new_value = get_chat_reward(channel_id)
-          chat_earned[user_id] = max(cur_value, new_value)
+          new_value = GetChatReward(channel_id)
+          chat_earned[user_id] = [cur_value, new_value].max
         end
       end
 
       # award points to each user participating in chat
       chat_earned.each do |user, earnings|
-        Bot::Bank::deposit(user, earnings)
+        Bot::Bank::Deposit(user, earnings)
       end
 
       # clear message values, will be repopulated
       @@sent_messages.clear()
-
-      # reward bonuses
-      @@message_bonus.each do |user, bonus|
-        Bot::Bank::deposit(user, bonus)
-      end
-
-      # clear bonuses, will be repopulated
-      @@message_bonus.clear()
     end
   end
 
@@ -175,17 +158,16 @@ module Bot::EconomyPassive
   # Get the Starbucks value for the specified action.
   # @param [String] action_name The action's name.
   # @return [Integer] Startbucks earned by the action. 
-  def get_action_earnings(action_name)
+  def GetActionEarnings(action_name)
     points_yaml = YAML.load_data!("#{ECON_DATA_PATH}/point_values.yml")
     return points_yaml[action_name]
   end
 
-  # Get the reward value for voice activity in the specified channel.
-  # @param [Integer] channel_id The channel the user is connected to.
-  # @return [Integer] The points earned by the activity.
-  def get_voice_reward(channel_id)
-    reward = get_action_earnings('activity_voice_chat')
-    return reward.nil? ? 0 : reward
+  # Reward a user for voice activity.
+  # @param [Integer] user_id User to reward
+  def RewardVoiceActivity(user_id)
+    reward = GetActionEarnings('activity_voice_chat')
+    Bot::Bank::Deposit(user_id, reward) if reward != nil
   end
 
   # Get the reward value for chatting in the specified channel.
@@ -193,63 +175,8 @@ module Bot::EconomyPassive
   # @param [Integer] user_id    The user's id.
   # @param [Integer] is_voice   Is this a voice channel?
   # @return [Integer] The points earned by the activity.
-  def get_chat_reward(channel_id)
-    reward = nil
-
-    case channel_id
-    when SVTFOE_DISCUSSION_ID
-      reward = get_action_earnings('activity_starvs_discussion')
-    else
-      reward = get_action_earnings('activity_text_chat')
-    end
-
-    return reward.nil? ? 0 : reward
-  end
-
-  # Give the bonus reward for special channels if the message meets the
-  # channel's criteria.
-  # @param [Integer] user_id            The user to reward.
-  # @param [Integer] channel_id         The channel the message was sent on.
-  # @param [Discordrb::Message] message The message.
-  def get_bonus_reward(user_id, channel_id, message)
-    reward = 0
-
-    case channel_id
-    when SVTFOE_GALLERY_ID
-      reward = get_action_earnings('activity_share_gallery') if
-        image?(message) or link?(message)
-    when ORIGINAL_ART_CHANNEL_ID
-      reward = get_action_earnings('activity_share_art') if
-        image?(message) or link?(message)
-    when ORIGINAL_CONTENT_CHANNEL_ID
-      reward = get_action_earnings('activity_share_content') if
-        image?(message) or link?(message)
-    end
-
-    return reward.nil? ? 0 : reward
-  end
-
-  # Check if a message has an image attachment.
-  # @param [Discordrb::Message] message The message.
-  # @return [bool] Has message?
-  def image?(message)
-    # if message has image award bonus Starbucks
-    return false if message.nil? or message.attachments.nil?
-
-    has_image = false
-    message.attachments.each do |attachment|
-      has_image = attachment.image?
-      break if has_image
-    end
-
-    return has_image
-  end
-
-  # Check if a message has a link.
-  # @param [Discordrb::Message] message The message.
-  # @return [bool] Has link?
-  def link?(message)
-    return false if message.nil? or message.content.nil?
-    return message.content =~ /#{URI::regexp(['http', 'https'])}/
+  def GetChatReward(channel_id)
+    reward = GetActionEarnings('activity_text_chat')
+    return reward != nil ? reward : 0
   end
 end

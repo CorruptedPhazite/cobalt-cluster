@@ -21,12 +21,6 @@ module Constants include IDs
   
   # See IDs for hardcoded id list
 
-  # The test server's test channel.
-  # This ID is specified here because it is NOT STANDARD.
-  # It is ONLY available on the test server and as such
-  # is not included in the ids file.
-  TEST_TEST_CHANNEL_ID = 804944041292201994
-
   # Scheduler constant
   SCHEDULER = Rufus::Scheduler.new
 
@@ -38,7 +32,6 @@ module Constants include IDs
   IMAGE_BANK = 'https://www.in-lease.com/getmedia/41535176-48fd-46a2-94c3-c9ff15413cb2/temp_icon.png'
   IMAGE_STARBUCKS = 'https://www.in-lease.com/getmedia/41535176-48fd-46a2-94c3-c9ff15413cb2/temp_icon.png'
   IMAGE_RICHEST = 'https://pbs.twimg.com/profile_images/780589072733593600/3rG5efnk_400x400.jpg'
-  IMAGE_CHECKIN = 'https://cdn.discordapp.com/attachments/753163836844146770/817923830856024115/cobalt_checkin.gif'
 
   # Strings
   STRING_BANK_NAME = "Bank"
@@ -141,17 +134,6 @@ module Convenience
     "#{int} #{str}"
   end
   alias_method(:pl, :plural)
-
-  # Rudimentary pluralize; returns pluralized str with added 's' only if the given int is not 1
-  # strips out number if 1
-  # @param  [Integer] int the integer to test
-  # @param  [String]  str the string to pluralize
-  # @return [String]  singular form (i.e. squid) if int is 1, plural form (8 squids) otherwise
-  def plural_every(int, str)
-    return "#{int} #{str}s" unless int == 1
-    "#{str}"
-  end
-  alias_method(:ple, :plural_every)
 
   # Perform an unsigned bitwise not on an integer.
   # Adds bits to round to the nearest half-byte for readability.
