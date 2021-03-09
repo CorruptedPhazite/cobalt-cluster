@@ -10,7 +10,7 @@ module Bot::BasicCommands
   command :ping do |event|
     break unless event.user.id == OWNER_ID || COBALT_DEV_ID.include?(event.user.id) || event.user.role?(COBALT_MOMMY_ROLE_ID) || event.user.role?(MODERATOR_ROLE_ID)
     ping = event.respond '**P** **O** **N** **G**'
-    ping.edit "**P** **O** **N** **G** **|** **#{(Time.now - event.timestamp)*1000}ms**"
+    ping.edit "**P** **O** **N** **G** **|** **#{(Time.now - event.timestamp)*100}ms**"
     sleep 10
     ping.delete
   end
@@ -18,7 +18,7 @@ module Bot::BasicCommands
   # Build Version command - Should be in this format: Build MM/DD/YYYY - Revision X (revision number should start at 0)
   command :build do |event|
     break unless event.user.id == OWNER_ID || COBALT_DEV_ID.include?(event.user.id) || event.user.role?(COBALT_MOMMY_ROLE_ID)
-    ping = event.respond "Build 1/31/2021 - Revision 2"
+    ping = event.respond "Build 2/28/2021 - Revision 1"
     sleep 10
     ping.delete
   end
